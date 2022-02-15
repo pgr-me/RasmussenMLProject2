@@ -1,0 +1,1 @@
+from p2.exploration.visualization import plot_histograms
