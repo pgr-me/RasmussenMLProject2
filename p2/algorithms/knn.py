@@ -5,8 +5,10 @@ This module provides the KNN class, the base class of KNNClassifier and KNNRegre
 
 """
 # Third party libraries
-import numpy as np
 import pandas as pd
+
+# Local imports
+from p2.algorithms.utils import minkowski_distance
 
 
 class KNN:
@@ -15,7 +17,7 @@ class KNN:
     We use a "training mask" as a way to subset the data for edited and condensed methods.
     """
 
-    def __init__(self, data: pd.DataFrame, k: int, label: str, index: str, method: str = None):
+    def __init__(self, data: pd.DataFrame, k: int, label: str, index: str, method: str = None, p: int = 2):
         self.data = data
         self.k = k
         self.label = label
@@ -24,6 +26,8 @@ class KNN:
         if method not in methods:
             raise ValueError(f"Method {method} is not one of {methods}.")
         self.method = method
+        self.p = p
+
         self.observations = self.data.index.tolist()
 
         # Initialize the training mask
@@ -33,7 +37,10 @@ class KNN:
             bools = [True for x in range(len(self.data))]
         self.training_mask = pd.Series(bools, index=self.data.index)
 
-    def compute_distances(self, x_q: pd.Series, X_t: pd.DataFrame, p=2) -> pd.Series:
+        # Other variables to initialize
+        self.lookup_table: pd.DataFrame = None
+
+    def compute_distances(self, x_q: pd.Series, X_t: pd.DataFrame) -> pd.Series:
         """
         Compute Minkowski distance between query point and X_t.
         :param x_q: Query point
@@ -49,10 +56,10 @@ class KNN:
             997    6.415379
             Name: distance, Length: 186, dtype: float64
         """
-        distances = minkowski_distance(x_q, X_t, p)
+        distances = minkowski_distance(x_q, X_t, self.p)
         return distances
 
-    def find_k_sorted_distances(self, distances: pd.Series, name: str = "distance"):
+    def find_k_nearest_distances(self, distances: pd.Series, name: str = "distance"):
         """
         Sort distances from query point.
         :param distances: Indexed series of distances from query point
