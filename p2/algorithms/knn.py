@@ -5,10 +5,11 @@ This module provides the KNN class, the base class of KNNClassifier and KNNRegre
 
 """
 # Third party libraries
+import numpy as np
 import pandas as pd
 
 # Local imports
-from p2.algorithms.utils import minkowski_distance
+from p2.algorithms.utils import minkowski_distances
 
 
 class KNN:
@@ -17,7 +18,8 @@ class KNN:
     We use a "training mask" as a way to subset the data for edited and condensed methods.
     """
 
-    def __init__(self, data: pd.DataFrame, k: int, label: str, index: str, method: str = None, p: int = 2):
+    def __init__(self, data: pd.DataFrame, k: int, label: str, index: str, method: str = None, p: int = 2,
+                 random_state: int = 777):
         self.data = data
         self.k = k
         self.label = label
@@ -27,50 +29,97 @@ class KNN:
             raise ValueError(f"Method {method} is not one of {methods}.")
         self.method = method
         self.p = p
+        self.random_state = random_state
 
         self.observations = self.data.index.tolist()
 
         # Initialize the training mask
+        bools = [True for x in range(len(self.data))]
+        self.training_mask = pd.Series(bools, index=self.data.index, name="training_mask")
+
+        # If method is condensed, we reverse booleans of training mask
         if method == "condensed":
-            bools = [False for x in range(len(self.data))]
-        else:
-            bools = [True for x in range(len(self.data))]
-        self.training_mask = pd.Series(bools, index=self.data.index)
+            self.training_mask.loc[:] = False
+
+        self.training_mask.index.name = index
 
         # Other variables to initialize
         self.lookup_table: pd.DataFrame = None
 
-    def compute_distances(self, x_q: pd.Series, X_t: pd.DataFrame) -> pd.Series:
+    def get_k_nearest_points(self, lookups: pd.DataFrame) -> pd.DataFrame:
         """
-        Compute Minkowski distance between query point and X_t.
-        :param x_q: Query point
-        :param X_t: Lookup table
-        :param p: Minkowski p-norm
-        :return: Distances between query point and lookup table
+        Retrieve k nearest points for selected indices.
+        :param lookups: Lookup table
+        :return: Dataframe of k nearest points per observation
         Example output:
-            index
-            0      7.117855
-            2      6.058951
-                     ...
-            995    5.711550
-            997    6.415379
-            Name: distance, Length: 186, dtype: float64
+                      obs_2_ix      dist
+            obs_1_ix
+            0               15  4.093547
+            0               35  4.117682
+            ...            ...       ...
+            99              92  3.736637
+            99              26  3.745070
         """
-        distances = minkowski_distance(x_q, X_t, self.p)
-        return distances
+        return lookups.sort_values(by="dist").head(self.k)
 
-    def find_k_nearest_distances(self, distances: pd.Series, name: str = "distance"):
+    def get_kth_nearest_point(self, obs_1_ixs: list = None) -> pd.DataFrame:
         """
-        Sort distances from query point.
-        :param distances: Indexed series of distances from query point
-        :return: k-nearest neighbors, their distances from query point, indices, & labels
+        Retrieve the kth nearest points from the distance lookup table for selected indices.
+        :obs_1_ixs: Select provided indices if not None
+        :return: Dataframe of kth nearest point to observation point for all observations
         Example output:
-                   distance    y
-            index
-            839    3.878051  1.0
-            17     3.912822  1.0
-            653    4.056486  1.0
+                      obs_2_ix      dist
+            obs_1_ix
+            1               23  3.807596
+            2                4  4.421822
+            3               41  4.884305
         """
-        k_sorted_distances = pd.Series(distances, name=name).sort_values().iloc[:self.k]
-        k_sorted_distances = k_sorted_distances.to_frame().join(self.data[[self.label]])
-        return k_sorted_distances
+        frame = self.all_lookups.copy()
+        if obs_1_ixs is not None:
+            frame = frame.set_index("obs_1_ix").loc[sorted(obs_1_ixs)]
+        return frame.groupby("obs_1_ix").nth(self.k - 1)
+
+    def make_lookup_table(self) -> pd.DataFrame:
+        """
+        Make a lookup table of distances - computed by Minkowski p-norm - among points.
+        :return: Distance lookup table sorted by observation and shortest distance to next observation
+        Same-point distances are excluded from the output
+        Example output:
+                      obs_2_ix      dist
+            obs_1_ix
+            0               15  4.093547
+            0               35  4.117682
+            ...            ...       ...
+            99              78  8.021557
+            99              11  9.205464
+        """
+
+        frame = self.data.copy().drop(axis=1, labels=self.label, errors="ignore")
+
+        # Create indice mappings
+        obs_1_indices = np.repeat(frame.index.values, len(frame))
+        obs_2_indices = np.vstack([frame.index.values for x in range(len(frame))]).ravel()
+
+        # Compute Minkowski distances for selected p
+        distances = minkowski_distances(frame.values, frame.values, p=self.p)
+
+        # Organize into a lookup table
+        all_lookups = np.stack([obs_1_indices, obs_2_indices, distances], axis=1)
+
+        all_lookups = pd.DataFrame(all_lookups, columns=["obs_1_ix", "obs_2_ix", "dist"])
+        all_lookups.loc[:, "obs_1_ix": "obs_2_ix"] = all_lookups.loc[:, "obs_1_ix": "obs_2_ix"].astype("Int32")
+
+        # Eliminate same observation-same observation distances (which are zero)
+        mask = all_lookups["obs_1_ix"] != all_lookups["obs_2_ix"]
+        all_lookups = all_lookups[mask].sort_values(by=["obs_1_ix", "dist"])
+
+        # Join obs_2 y's and obs_1 y's and call them pred and truth, respectively
+        all_lookups = all_lookups.set_index("obs_2_ix").join(self.data[[self.label]]).reset_index()
+        all_lookups.rename(columns={"index": "obs_2_ix", self.label: "pred"}, inplace=True)
+
+        all_lookups.set_index("obs_1_ix", inplace=True)
+        all_lookups = all_lookups.join(self.data[[self.label]], how="left").rename(columns={self.label: "truth"})
+        all_lookups.index.names = ["obs_1_ix"]
+
+        self.all_lookups = all_lookups.copy().sort_values(by="dist")
+        return self.all_lookups
