@@ -1,6 +1,6 @@
 # Peter Rasmussen, Programming Assignment 2
 
-This Python 3 program trains simple majority predictors across six datasets, using the mode as the estimator for classification datasets and the mean for regression datasets.
+This Python 3 program trains the k nearest neighbor predictor across six datasets, using accuracy for the classification data and normalized interquantile root mean squared error for the regression data.
 
 ## Getting Started
 
@@ -33,21 +33,25 @@ Optional arguments:
 
 ## Key parts of program
 * run.py: Executes data loading, preprocessing, training, socring, and output creation.
-* preprocessor.py: Preprocesses data: loading, imputation, discretization, and fold assignment. 
-* majority_predictor.py: Trains and scores
-  * Classification datasets are scored on the basis of accuracy
-  * Regression datasets are scored on the basis of mean squared error
+* preprocessor.py: Preprocesses data: loading, imputation, discretization, and fold assignment.
+
+* knn_classifier.py
+  * Employs majority rule to predict
+  * Scored on the basis of accuracy
+* knn_regressor.py
+  * Uses a gaussian kernel to weight nearest neighbor label values
+  * Regression datasets are scored on the basis of normalized interquantile root mean squared error
 
 ## Features
 
 * Performance metrics for each run for each dataset.
-* Tested on all six datasets.
-* Outputs provided as two files: 1) CSV of performance metrics by fold and 2) CSV of performance metrics by dataset.
+* Support for edited and condensed mode.
+* Outputs provided as three files: 1) testing results, tuning results, and summary scores.
 * Control over number of folds, validation fraction, and randomization.
 
 ## Output Files
 
-See the ```output.csv``` and ```summary.csv``` files in the ```data/``` directory.
+See the ```testing_results.csv```, ```tuning_results.csv```, and summary.csv``` files in the ```data/``` directory.
 
 ## Licensing
 

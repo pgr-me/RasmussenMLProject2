@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 # Local imports
-from p2.algorithms import KNN
+from p2.algorithms.knn import KNN
 from p2.algorithms.utils import gaussian_smoother, minkowski_distances, relative_error
 
 
@@ -42,7 +42,8 @@ class KNNRegressor(KNN):
         train_indices = np.vstack([self.neigh_data.index.values for x in range(len(test_data))]).ravel()
 
         # Compute distances
-        distances = minkowski_distances(test_data.loc[:, 1:].values, self.neigh_data.loc[:, 1:].values)
+        distances = minkowski_distances(test_data.drop(axis=1, labels=self.label).values,
+                                        self.neigh_data.drop(axis=1, labels=self.label).values)
         columns = ["test_ix", "neigh_ix", "dist"]
         distances = pd.DataFrame(np.stack([test_indices, train_indices, distances], axis=1), columns=columns)
         distances.loc[:, "test_ix": "neigh_ix"] = distances.loc[:, "test_ix": "neigh_ix"].astype("Int32")
@@ -87,11 +88,15 @@ class KNNRegressor(KNN):
         Note: We don't need to "do" anything to the training mask if we're not editing or condensing.
         :return: Subsetted training data to be used for prediction
         """
-        if self.method is not None:
+        counter = 0
+        if self.method not in [None, "None"]:
             while True:
                 prior_training_mask = self.training_mask.copy()
                 self.modify_lookups(sigma, epsilon)
                 if self.method == "edited" or prior_training_mask.equals(self.training_mask):
+                    break
+                counter += 1
+                if counter > 4:
                     break
         self.neigh_data = self.data.copy()[self.training_mask]
         return self.neigh_data

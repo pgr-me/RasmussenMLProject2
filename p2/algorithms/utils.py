@@ -37,7 +37,7 @@ def compute_classification_scores(results: pd.DataFrame, scores_name: str = None
     prec = tp / (tp + fp)
     rec = tp / pos
     f1 = 2 * prec * rec / (prec + rec)
-    acc = (tp + tn) / n
+    acc = (results["truth"] == results["pred"]).sum()
     scores_dict = dict(n=n, pos=pos, neg=neg, tp=tp, tn=tn, fp=fp, fn=fn, prec=prec, rec=rec, f1=f1, acc=acc)
     return pd.Series(scores_dict, name=scores_name).to_frame()
 
@@ -54,10 +54,16 @@ def compute_tp_tn_fp_fn(results) -> pd.DataFrame:
         42       0.0   0.0  False   True  False  False
         88       1.0   1.0   True  False  False  False
     """
-    results["tp"] = (results["truth"] == 1) & (results["pred"] == 1)
-    results["tn"] = (results["truth"] == 0) & (results["pred"] == 0)
-    results["fp"] = (results["truth"] == 0) & (results["pred"] == 1)
-    results["fn"] = (results["truth"] == 1) & (results["pred"] == 0)
+    try:
+        results["tp"] = (results["truth"] == 1) & (results["pred"] == 1)
+        results["tn"] = (results["truth"] == 0) & (results["pred"] == 0)
+        results["fp"] = (results["truth"] == 0) & (results["pred"] == 1)
+        results["fn"] = (results["truth"] == 1) & (results["pred"] == 0)
+    except:
+        results["tp"] = 0
+        results["tn"] = 0
+        results["fp"] = 0
+        results["fn"] = 0
     return results
 
 

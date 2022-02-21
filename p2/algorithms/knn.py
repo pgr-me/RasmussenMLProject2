@@ -24,7 +24,7 @@ class KNN:
         self.k = k
         self.label = label
         self.index = index
-        methods = [None, "edited", "condensed"]
+        methods = [None, "None", "edited", "condensed"]
         if method not in methods:
             raise ValueError(f"Method {method} is not one of {methods}.")
         self.method = method

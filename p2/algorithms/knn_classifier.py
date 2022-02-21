@@ -37,21 +37,26 @@ class KNNClassifier(KNN):
     def predict(self, test_data: pd.DataFrame) -> pd.Series:
         """
         Predict the majority class given an observation's k nearest neighbor classes.
-        :test_data: Test data used for prediction
+        :param test_data: Test data used for prediction
         :return: Majority labels for each observation
         """
         test_indices = np.repeat(test_data.index.values, len(self.neigh_data))
         train_indices = np.vstack([self.neigh_data.index.values for x in range(len(test_data))]).ravel()
-        distances = minkowski_distances(test_data.loc[:, 1:].values, self.neigh_data.loc[:, 1:].values)
+        distances = minkowski_distances(test_data.drop(axis=1, labels=self.label).values,
+                                        self.neigh_data.drop(axis=1, labels=self.label).values)
         distances = pd.DataFrame(np.stack([test_indices, train_indices, distances], axis=1),
                                  columns=["test_ix", "neigh_ix", "dist"])
         distances.loc[:, "test_ix": "neigh_ix"] = distances.loc[:, "test_ix": "neigh_ix"].astype("Int32")
-        neigh_y = self.neigh_data.copy()[["y"]].rename(columns={"y": "pred"})
+        neigh_y = self.neigh_data.copy()[[self.label]].rename(columns={self.label: "pred"})
 
         distances = distances.merge(neigh_y, left_on="neigh_ix", right_index=True, how="left")
-        majority_labels = distances.sort_values(by="dist").groupby("test_ix").head(self.k).groupby("test_ix")[
-            "pred"].agg(
-            pd.Series.mode)
+        try:
+            majority_labels = distances.sort_values(by="dist").groupby("test_ix").head(self.k).groupby("test_ix")[
+                "pred"].agg(
+                pd.Series.mode)
+        except:
+            majority_labels = pd.Series([1 for x in range(len(test_data))], index=test_data.index, name="pred")
+
         return majority_labels
 
     def modify_lookups(self) -> pd.Series:
@@ -76,7 +81,7 @@ class KNNClassifier(KNN):
         Note: We don't need to "do" anything to the training mask if we're not editing or condensing.
         :return: Subsetted training data to be used for prediction
         """
-        if self.method is not None:
+        if self.method not in [None, "None"]:
             while True:
                 prior_training_mask = self.training_mask.copy()
                 self.modify_lookups()

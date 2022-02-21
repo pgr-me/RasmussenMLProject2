@@ -1,3 +1,3 @@
 # RasmussenMLProject2
-Second of five projects in JHU ML course
 
+NOTE: This README serves as an informational entry point to the more detailed README provided in ```p2/```.
