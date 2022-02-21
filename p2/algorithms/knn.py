@@ -45,6 +45,8 @@ class KNN:
 
         # Other variables to initialize
         self.lookup_table: pd.DataFrame = None
+        self.all_lookups: pd.DataFrame = None
+        self.neigh_data: pd.DataFrame = None
 
     def get_k_nearest_points(self, lookups: pd.DataFrame) -> pd.DataFrame:
         """
@@ -96,7 +98,7 @@ class KNN:
 
         frame = self.data.copy().drop(axis=1, labels=self.label, errors="ignore")
 
-        # Create indice mappings
+        # Create index mappings
         obs_1_indices = np.repeat(frame.index.values, len(frame))
         obs_2_indices = np.vstack([frame.index.values for x in range(len(frame))]).ravel()
 

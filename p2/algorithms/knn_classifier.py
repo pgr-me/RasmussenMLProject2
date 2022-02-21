@@ -13,7 +13,8 @@ import numpy as np
 import pandas as pd
 
 # Local imports
-from p2.algorithms import KNN, minkowski_distance
+from p2.algorithms.knn import KNN
+from p2.algorithms.utils import compute_classification_scores, compute_tp_tn_fp_fn, minkowski_distances
 
 
 class KNNClassifier(KNN):
@@ -24,79 +25,97 @@ class KNNClassifier(KNN):
     def __init__(self, data: pd.DataFrame, k: int, label: str, index: str, method: str = None):
         super().__init__(data, k, label, index, method)
 
-    def determine_majority_label(self, k_nearest_distances: pd.DataFrame,
-                                 empty_set_label: t.Union[int, bool, float] = -1) -> t.Union[int, bool, float]:
+    def make_results(self, test: pd.DataFrame, pred: pd.Series):
         """
-        Determine the majority label among k nearest neighbors to query point.
-        :param k_nearest_distances: KNN, distances from query point, indices, & labels
-        :param empty_set_label: Empty set label used when there are zero votes for the majority label
-        :return: Majority label
-        If there are ties, randomly select one of the winners.
+        Join test and prediction data and compute true / false positives / negatives.
+        :param test: Test (or validation) dataset
+        :param pred: Prediction values
         """
-        votes = k_nearest_distances[self.label].value_counts().sample(frac=1)
-        if len(votes) == 0:
-            majority_label = empty_set_label
-        else:
-            majority_label = votes.drop_duplicates().sort_values(ascending=False).index[0]
-        return majority_label
+        results = test.copy()[[self.label]].rename(columns={self.label: "truth"}).join(pred)
+        return compute_tp_tn_fp_fn(results)
 
-    def predict(self, x_q: pd.Series) -> t.Union[int, bool, float]:
+    def predict(self, test_data: pd.DataFrame) -> pd.Series:
         """
-        Predict the majority label of a query point x_q.
-        :param x_q: Query point
-        :return: Majority label
+        Predict the majority class given an observation's k nearest neighbor classes.
+        :test_data: Test data used for prediction
+        :return: Majority labels for each observation
         """
-        if self.lookup_table is None:
-            raise ValueError("You must train the classifier before running the predict method.")
-        distances = self.compute_distances(x_q, self.lookup_table)
-        k_nearest_distances = self.find_k_nearest_distances(distances)
-        majority_label = self.determine_majority_label(k_nearest_distances)
-        return majority_label
+        test_indices = np.repeat(test_data.index.values, len(self.neigh_data))
+        train_indices = np.vstack([self.neigh_data.index.values for x in range(len(test_data))]).ravel()
+        distances = minkowski_distances(test_data.loc[:, 1:].values, self.neigh_data.loc[:, 1:].values)
+        distances = pd.DataFrame(np.stack([test_indices, train_indices, distances], axis=1),
+                                 columns=["test_ix", "neigh_ix", "dist"])
+        distances.loc[:, "test_ix": "neigh_ix"] = distances.loc[:, "test_ix": "neigh_ix"].astype("Int32")
+        neigh_y = self.neigh_data.copy()[["y"]].rename(columns={"y": "pred"})
 
-    def train(self):
+        distances = distances.merge(neigh_y, left_on="neigh_ix", right_index=True, how="left")
+        majority_labels = distances.sort_values(by="dist").groupby("test_ix").head(self.k).groupby("test_ix")[
+            "pred"].agg(
+            pd.Series.mode)
+        return majority_labels
+
+    def modify_lookups(self) -> pd.Series:
+        """
+        Modify lookups using either the condensed or edited method.
+        :return: Condensed or edited training mask
+        """
+        for observation in self.observations:
+            lookups = self.all_lookups.copy().loc[observation].set_index("obs_2_ix")
+            lookups = lookups.join(self.training_mask[self.training_mask]).dropna()
+            k_nearest_points = self.get_k_nearest_points(lookups)
+            pred_label = self.determine_majority_label(k_nearest_points)
+            true_label = self.data.copy().loc[observation, self.label]
+            if pred_label != true_label:
+                boolean = False if self.method == "edited" else True
+                self.training_mask.loc[observation] = boolean
+        return self.training_mask
+
+    def train(self) -> pd.DataFrame:
         """
         Train the k nearest neighbor classifier.
         Note: We don't need to "do" anything to the training mask if we're not editing or condensing.
+        :return: Subsetted training data to be used for prediction
         """
-
         if self.method is not None:
-            for observation in self.observations:
-                x_q = self.data.copy().loc[observation]
+            while True:
+                prior_training_mask = self.training_mask.copy()
+                self.modify_lookups()
+                if self.method == "edited" or prior_training_mask.equals(self.training_mask):
+                    break
+        self.neigh_data = self.data.copy()[self.training_mask]
+        return self.neigh_data
 
-                # Compute distances for edited method
-                if self.method == "edited":
-                    X_t = self.data.copy()[self.training_mask].drop(labels=observation)
-                    distances = minkowski_distance(x_q.iloc[1:], X_t.loc[:, 1:]).rename("distance")
+    @staticmethod
+    def determine_majority_label(k_nearest_points: pd.DataFrame,
+                                 empty_set_label: t.Union[int, bool, float] = -1) -> t.Union[int, bool, float]:
+        """
+        Determine the majority label among k nearest neighbors to query point.
+        :param k_nearest_points: KNN, distances from query point, indices, & labels
+        :param empty_set_label: Empty set label used when there are zero votes for the majority label
+        :return: Majority label
+        """
+        votes = k_nearest_points["pred"].value_counts()
+        if len(votes) == 0:
+            return empty_set_label
+        return votes.index[0]
 
-                # Compute distances for condensed method
-                else:
-                    Z_t = self.data.copy()[self.training_mask]
-                    # Compute distances among x_q and each observation in X_t
-                    distances = minkowski_distance(x_q.iloc[1:], Z_t.loc[:, 1:]).rename("distance")
-
-                # Sort distances
-                sorted_distances = pd.Series(distances, name="distance").sort_values()
-                k_nearest_distances = sorted_distances.iloc[:self.k].to_frame().join(self.data[[self.label]])
-
-                # Determine majority label and extract true label
-                majority_label = self.determine_majority_label(k_nearest_distances)
-                true_label = x_q.iloc[0]
-
-                # Conditionally update training_mask
-                if majority_label != true_label:
-
-                    # Update training mask for edited method
-                    if self.method == "edited":
-                        self.training_mask.loc[observation] = False
-
-                    # Update training mask for condensed method
-                    else:
-                        self.training_mask.loc[observation] = True
-
-        # Define lookup table as dataset masked by training mask
-        self.lookup_table = self.data.copy()[self.training_mask]
-
-        return self.training_mask
-
-    def score(self, metric: str):
-        pass
+    @staticmethod
+    def score(results: pd.DataFrame, scores_name: str = None) -> pd.DataFrame:
+        """
+        Compute classification scores from results set.
+        :param results: Results dataframe produced by compute_tp_tn_fp_fn function
+        :param scores_name: Name of series
+        :return: Scores
+        Example output:
+            n       10.000000
+            pos      2.000000
+            neg      8.000000
+            tp       2.000000
+            tn       7.000000
+            fp       1.000000
+            prec     0.666667
+            rec      0.875000
+            f1       0.756757
+            acc      0.900000
+        """
+        return compute_classification_scores(results, scores_name=scores_name)

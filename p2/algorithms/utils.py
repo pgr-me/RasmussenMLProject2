@@ -61,7 +61,7 @@ def compute_tp_tn_fp_fn(results) -> pd.DataFrame:
     return results
 
 
-def gaussian_smoother(distances: np.array, sigma: int):
+def gaussian_smoother(distances: np.array, sigma: float):
     """
     Apply a Gaussian smoother to create weights for an array of distances.
     :param distances: 1D array of distances
